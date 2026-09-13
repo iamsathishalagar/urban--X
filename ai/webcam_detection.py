@@ -58,13 +58,23 @@ app = Flask(
     static_folder=str(dashboard_path),
     static_url_path=""
 )
-CORS(app)
+CORS(
+    app,
+    resources={
+        r"/api/*": {
+            "origins": [
+                "https://urbanx-0109.web.app",
+                "http://localhost:5500",
+                "http://127.0.0.1:5500"
+            ]
+        }
+    }
+)
 
 
 @app.route("/")
 def serve_dashboard():
     return send_from_directory(dashboard_path, "index.html")
-
 
 # ==========================================
 # LIVE DATA
