@@ -1181,6 +1181,7 @@ while True:
     if browser_camera_active:
         try:
             frame = browser_frame_queue.get(timeout=0.25)
+            print("[QUEUE TEST] Browser frame received", flush=True)
             success = True
         except Empty:
             continue

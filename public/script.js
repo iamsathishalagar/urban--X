@@ -61,7 +61,7 @@ const busFilter = document.getElementById("busFilter");
 const busMarkers = new Map();
 let selectedBusId = "";
 const markerState = new Map();
-const API_BASE_URL = window.URBANEYE_API_BASE_URL ?? "http://127.0.0.1:5000";
+const API_BASE_URL = window.URBANEYE_API_BASE_URL ?? "https://urban-x-ai-backend.onrender.com";
 
 function apiUrl(path) {
     const url = new URL(path, API_BASE_URL || window.location.origin);
@@ -163,7 +163,16 @@ function setCameraState(status, message, showFallback) {
     }
 }
 
-function openCameraModal() {
+// ==========================================
+// BROWSER AI CAMERA
+// ==========================================
+
+let cameraStreamActive = false;
+let cameraCaptureInterval = null;
+let cameraCanvas = null;
+let cameraContext = null;
+
+async function openCameraModal() {
     if (!cameraModal || !cameraStream) {
         return;
     }
@@ -171,49 +180,253 @@ function openCameraModal() {
     cameraModal.classList.add("is-open");
     cameraModal.setAttribute("aria-hidden", "false");
     document.body.classList.add("camera-modal-open");
-    setCameraState("CONNECTING", "Connecting", false);
-    cameraStream.src = apiUrl("/video_feed");
+
+    setCameraState("CONNECTING", "Requesting Camera...", false);
+
+    try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error("Browser camera API is not supported");
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                facingMode: "environment"
+            },
+            audio: false
+        });
+
+        cameraStream.srcObject = stream;
+
+        await cameraStream.play();
+
+        cameraStreamActive = true;
+
+        cameraCanvas = document.createElement("canvas");
+        cameraContext = cameraCanvas.getContext("2d");
+
+        setCameraState(
+            "CONNECTED",
+            "AI Camera Connected",
+            false
+        );
+
+        console.log("[CAMERA] Browser camera connected");
+
+        startCameraDetection();
+
+    } catch (error) {
+
+        console.error(
+            "[CAMERA] Camera access failed:",
+            error
+        );
+
+        cameraStreamActive = false;
+
+        setCameraState(
+            "OFFLINE",
+            "Camera Permission Required",
+            true
+        );
+    }
+
     closeCameraModal?.focus();
 }
 
-function closeCameraViewer() {
-    if (!cameraModal || !cameraStream) {
-        return;
+
+function startCameraDetection() {
+
+    if (cameraCaptureInterval) {
+        clearInterval(cameraCaptureInterval);
     }
 
-    cameraStream.removeAttribute("src");
-    cameraModal.classList.remove("is-open");
-    cameraModal.setAttribute("aria-hidden", "true");
-    document.body.classList.remove("camera-modal-open");
-    setCameraState("OFFLINE", "Closed", false);
-    console.log("[CAMERA] Camera stopped");
+    cameraCaptureInterval = setInterval(async function () {
+
+        if (!cameraStreamActive) {
+            return;
+        }
+
+        if (
+            !cameraStream.videoWidth ||
+            !cameraStream.videoHeight
+        ) {
+            return;
+        }
+
+        try {
+
+            cameraCanvas.width = cameraStream.videoWidth;
+            cameraCanvas.height = cameraStream.videoHeight;
+
+            cameraContext.drawImage(
+                cameraStream,
+                0,
+                0,
+                cameraCanvas.width,
+                cameraCanvas.height
+            );
+
+            const blob = await new Promise(function (resolve) {
+
+                cameraCanvas.toBlob(
+                    resolve,
+                    "image/jpeg",
+                    0.75
+                );
+
+            });
+
+            if (!blob) {
+                return;
+            }
+
+            const response = await fetch(
+                apiUrl("/api/detect-frame"),
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "image/jpeg"
+                    },
+                    body: blob
+                }
+            );
+
+            if (!response.ok) {
+
+                console.error(
+                    "[CAMERA] Detection request failed:",
+                    response.status
+                );
+
+            }
+
+        } catch (error) {
+
+            console.error(
+                "[CAMERA] Frame detection error:",
+                error
+            );
+
+        }
+
+    }, 500);
+}
+
+
+function closeCameraViewer() {
+
+    cameraStreamActive = false;
+
+    if (cameraCaptureInterval) {
+        clearInterval(cameraCaptureInterval);
+        cameraCaptureInterval = null;
+    }
+
+    if (
+        cameraStream &&
+        cameraStream.srcObject
+    ) {
+
+        cameraStream.srcObject
+            .getTracks()
+            .forEach(function (track) {
+                track.stop();
+            });
+
+        cameraStream.srcObject = null;
+    }
+
+    if (cameraModal) {
+
+        cameraModal.classList.remove("is-open");
+
+        cameraModal.setAttribute(
+            "aria-hidden",
+            "true"
+        );
+    }
+
+    document.body.classList.remove(
+        "camera-modal-open"
+    );
+
+    setCameraState(
+        "OFFLINE",
+        "Closed",
+        false
+    );
+
+    console.log(
+        "[CAMERA] Browser camera stopped"
+    );
+
     aiCameraFeed?.focus();
 }
 
-aiCameraFeed?.addEventListener("click", openCameraModal);
-aiCameraFeed?.addEventListener("keydown", function (event) {
-    if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        openCameraModal();
+
+// ==========================================
+// CAMERA EVENTS
+// ==========================================
+
+aiCameraFeed?.addEventListener(
+    "click",
+    openCameraModal
+);
+
+aiCameraFeed?.addEventListener(
+    "keydown",
+    function (event) {
+
+        if (
+            event.key === "Enter" ||
+            event.key === " "
+        ) {
+
+            event.preventDefault();
+
+            openCameraModal();
+        }
     }
-});
-closeCameraModal?.addEventListener("click", closeCameraViewer);
-cameraModal?.addEventListener("click", function (event) {
-    if (event.target.matches("[data-camera-close]")) {
-        closeCameraViewer();
+);
+
+
+closeCameraModal?.addEventListener(
+    "click",
+    closeCameraViewer
+);
+
+
+cameraModal?.addEventListener(
+    "click",
+    function (event) {
+
+        if (
+            event.target.matches(
+                "[data-camera-close]"
+            )
+        ) {
+
+            closeCameraViewer();
+        }
     }
-});
-cameraStream?.addEventListener("load", function () {
-    setCameraState("CONNECTED", "AI Camera Connected", false);
-});
-cameraStream?.addEventListener("error", function () {
-    setCameraState("OFFLINE", "AI Camera Unavailable", true);
-});
-document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape" && cameraModal?.classList.contains("is-open")) {
-        closeCameraViewer();
+);
+
+
+document.addEventListener(
+    "keydown",
+    function (event) {
+
+        if (
+            event.key === "Escape" &&
+            cameraModal?.classList.contains("is-open")
+        ) {
+
+            closeCameraViewer();
+        }
     }
-});
+);
 
 function drawTrafficChart() {
     if (!trafficChart) {
@@ -815,13 +1028,13 @@ async function loadAccidentIncidents() {
         }
 
         normalizedIncidents.forEach((incident) => {
-            const row = document.createElement("tr");
             const imageLink = incident.accident_image_path
-                ? `<a href="http://127.0.0.1:5000${incident.accident_image_path}" target="_blank" rel="noopener">View image</a>`
-                : "-";
-            const videoLink = incident.accident_video_path
-                ? `<a href="http://127.0.0.1:5000${incident.accident_video_path}" download>View/Download video</a>`
-                : "Preparing video...";
+    ? `<a href="${API_BASE_URL}${incident.accident_image_path}" target="_blank" rel="noopener">View image</a>`
+    : "-";
+
+const videoLink = incident.accident_video_path
+    ? `<a href="${API_BASE_URL}${incident.accident_video_path}" download>View/Download video</a>`
+    : "Preparing video...";
             row.innerHTML = `
                 <td>${incident.incident_id ?? "-"}</td>
                 <td>${incident.bus_id ?? "BUS-001"}</td>
