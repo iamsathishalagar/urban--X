@@ -1207,6 +1207,8 @@ while True:
     # ==========================================
 
     results = model(frame, verbose=False)
+    print("[YOLO TEST] Results received:", len(results))
+    print("[YOLO TEST] Frame shape:", frame.shape)
     pothole_results = (
         pothole_model(frame, conf=CONFIDENCE_THRESHOLD, verbose=False)
         if pothole_model is not None
