@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Ministry of Public Transport | Urban X Intelligence System; Mobility Intelligence Platform</title>
+
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Satellite favicon -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛰️</text></svg>"/>
+
+    <!-- Leaflet Map -->
+<link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+/>
+
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+</head>
+<body>
+
+    <section id="splashScreen" class="splash-screen" aria-label="UrbanEye AI loading">
+        <img src="Urban X.png" alt="National road safety monitoring">
+    </section>
+
+    <div class="app">
+
+        <!-- SIDEBAR -->
+        <aside class="sidebar">
+
+            <div class="logo">
+                <div class="logo-mark"><i class="fa-solid fa-landmark"></i></div>
+                <div>
+                    <strong data-i18n="government">Government of India</strong>
+                    <span data-i18n="ministry">Urban X Intellenice System</span>
+                </div>
+            </div>
+
+            <nav>
+
+                <a href="#dashboard" class="active" data-nav-label="National Dashboard">
+                    <i class="fa-solid fa-gauge-high"></i><span data-i18n="dashboard">National Dashboard</span>
+                </a>
+
+                <a href="#map-section" data-nav-label="Live Network">
+                    <i class="fa-solid fa-map-location-dot"></i><span data-i18n="liveNetwork">Live Network</span>
+                </a>
+
+                <a href="#road-health" data-nav-label="Road Health">
+                    <i class="fa-solid fa-road"></i><span data-i18n="roadHealth">Road Health</span>
+                </a>
+
+                <a href="#traffic-analytics" data-nav-label="Traffic Analytics">
+                    <i class="fa-solid fa-chart-line"></i><span data-i18n="trafficMonitoring">Traffic Monitoring</span>
+                </a>
+
+                <a href="#incidents" data-nav-label="Incidents">
+                    <i class="fa-solid fa-triangle-exclamation"></i><span data-i18n="incidents">Incidents</span>
+                </a>
+
+                <a href="#reports" id="reportsBtn" data-nav-label="Reports">
+                    <i class="fa-solid fa-file-lines"></i><span data-i18n="reports">Reports</span>
+                </a>
+
+                <a href="#incidents" data-nav-label="Alerts">
+                    <i class="fa-solid fa-bell"></i><span data-i18n="alerts">Alerts</span>
+                </a>
+
+                <a href="#settings" data-nav-label="Settings">
+                    <i class="fa-solid fa-gear"></i><span data-i18n="settings">Settings</span>
+                </a>
+
+            </nav>
+
+            <div class="system-status">
+                <p><i class="fa-solid fa-circle"></i> <span data-i18n="systemOnline">System Online</span></p>
+                <span data-i18n="edgeAiConnected">Edge AI connected</span>
+                <small><span data-i18n="label.lastSync">Last sync</span>: <strong id="lastSync" data-status-key="status.live">Live</strong></small>
+            </div>
+
+        </aside>
+
+
+        <!-- MAIN CONTENT -->
+        <main id="dashboard" class="main-content">
+
+            <!-- HEADER -->
+            <header class="portal-header dashboard-content">
+                <div class="emblem-lockup">
+                    <div class="emblem"><i class="fa-solid fa-landmark"></i></div>
+                    <div>
+                        <strong data-i18n="government">Government of India</strong>
+                        <span data-i18n="ministry">Ministry of Public Transport</span>
+                    </div>
+                </div>
+                <div class="portal-title">
+                    <h1 data-i18n="ministry">Ministry of Public Transport</h1>
+                    <p data-i18n="subtitle">Urban X Intellenice System Mobility Intelligence Platform</p>
+                </div>
+                <div class="header-right">
+                    <button type="button" class="icon-button" aria-label="Notifications"><i class="fa-regular fa-bell"></i><span id="notificationBadge" class="notification-badge" hidden>0</span></button>
+                    <label class="language-control"><span data-i18n="language">Language</span><select id="languageSelector" aria-label="Language"></select></label>
+                    <label class="bus-filter-control"><span data-i18n="busFilter">Bus</span><select id="busFilter" aria-label="Bus filter"><option value="" data-i18n="allBuses">All Buses</option><option value="BUS-001">BUS-001</option><option value="BUS-002">BUS-002</option><option value="BUS-003">BUS-003</option></select></label>
+                    <div class="admin-avatar">AD</div>
+                    <div class="admin"><strong data-i18n="administrator">Administrator</strong><span data-i18n="commandCentre">National Command Centre</span></div>
+                    <i class="fa-solid fa-chevron-down profile-chevron"></i>
+                </div>
+            </header>
+
+            <section class="page-heading dashboard-content">
+                <div>
+                    <div class="eyebrow"><span data-i18n="label.nationalControlRoom">National Control Room / Live Operations</span></div>
+                    <h2 data-i18n="dashboardHeading">National Road Safety &amp; Mobility Intelligence</h2>
+                    <p data-i18n="dashboardDescription">Live operational view of road conditions, mobility, and incident response across the network.</p>
+                </div>
+                <div class="session-meta">
+                    <span><i class="fa-regular fa-calendar"></i> <strong id="currentDate">--</strong></span>
+                    <span><i class="fa-solid fa-arrows-rotate"></i> <span data-i18n="label.lastSync">Last sync</span> <strong id="lastSyncMain" data-status-key="status.live">Live</strong></span>
+                    <span class="online-chip"><i class="fa-solid fa-circle"></i> <span data-i18n="status.online">System online</span></span>
+                </div>
+            </section>
+
+
+            <!-- STATISTICS -->
+            <section class="stats dashboard-content" aria-label="National monitoring summary">
+
+                <div class="card">
+                    <div class="icon icon-blue"><i class="fa-solid fa-road-barrier"></i></div>
+
+                    <div>
+                        <p data-i18n="roadDefects">Road Defects</p>
+                        <h2 id="roadDefects">24</h2>
+                        <span><i class="fa-solid fa-circle"></i> <span data-i18n="detectedToday">Detected today</span></span>
+                    </div>
+                </div>
+
+
+                <div class="card">
+
+                    <div class="icon icon-green"><i class="fa-solid fa-car-side"></i></div>
+
+                    <div>
+                        <p data-i18n="vehiclesMonitored">Vehicles Monitored</p>
+                        <h2 id="vehicle">128</h2>
+                        <span id="floodStatus"><i class="fa-solid fa-circle"></i> <span data-i18n="liveDetection">Live detection</span></span>
+                    </div>
+
+                </div>
+
+
+                <div class="card">
+
+                    <div class="icon icon-amber"><i class="fa-solid fa-traffic-light"></i></div>
+
+                    <div>
+                        <p data-i18n="trafficMonitoring">Traffic Monitoring</p>
+                        <h2 id="trafficStatus" data-status-key="status.medium">Medium</h2>
+                        <span><i class="fa-solid fa-circle"></i> <span data-i18n="currentDensity">Current density</span></span>
+                    </div>
+
+                </div>
+
+
+                <div class="card">
+                    <div class="icon icon-red"><i class="fa-solid fa-triangle-exclamation"></i></div>
+
+                    <div>
+                        <p data-i18n="activeIncidents">Active Incidents</p>
+                        <h2 id="alerts">3</h2>
+                        <span><i class="fa-solid fa-circle"></i> <span data-i18n="requiresAttention">Requires attention</span></span>
+                    </div>
+
+                </div>
+
+                <div class="card">
+                    <div class="icon icon-red"><i class="fa-solid fa-car-burst"></i></div>
+
+                    <div>
+                        <p data-i18n="incidents">Incidents</p>
+                        <h2 id="accidentDetection" data-status-key="status.clear">Clear</h2>
+                        <span id="accidentDetectionStatus"><i class="fa-solid fa-circle"></i> <span data-i18n="noConfirmedAccident">No confirmed accident</span></span>
+                    </div>
+
+                </div>
+
+                <div class="card">
+                    <div class="icon icon-cyan"><i class="fa-solid fa-water"></i></div>
+
+                    <div>
+                        <p data-i18n="waterlogging">Waterlogging</p>
+                        <h2 id="floods">0</h2>
+                        <span id="zebraStatus"><i class="fa-solid fa-circle"></i> <span data-i18n="liveDetection">Live detection</span></span>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="icon icon-purple"><i class="fa-solid fa-person-walking"></i></div>
+
+                    <div>
+                        <p data-i18n="pedestrianSafety">Pedestrian Safety</p>
+                        <h2 id="zebraCrossings">0</h2>
+                        <span><i class="fa-solid fa-circle"></i> <span data-i18n="liveDetection">Live detection</span></span>
+                    </div>
+                </div>
+
+                <div class="card anpr-card">
+                    <div class="icon icon-navy"><i class="fa-solid fa-id-card"></i></div>
+                    <div>
+                        <p data-i18n="anprEvidence">ANPR Evidence</p>
+                        <h2 id="anprEvidenceCount">0</h2>
+                        <span data-i18n="accidentOnly">Accident-linked records only</span>
+                    </div>
+                </div>
+
+            </section>
+
+
+            <!-- MAP -->
+            <section id="map-section" class="map-section dashboard-content">
+
+                <div class="section-header">
+
+                    <div>
+                        <h2 data-i18n="nationalMap">Live National Road Monitoring</h2>
+                        <p data-i18n="nationalMapDescription">Connected assets, hazards, and response locations</p>
+                    </div>
+
+                    <button type="button"><i class="fa-solid fa-circle"></i> <span data-i18n="live">LIVE</span></button>
+
+                </div>
+
+
+                <div class="map-monitor-grid">
+                    <div id="map"></div>
+                    <div id="aiCameraFeed" class="video-monitor" role="button" tabindex="0" aria-controls="cameraModal" aria-label="Open live AI camera monitoring">
+                        <div class="monitor-heading">
+                            <div><span class="eyebrow"><span></span> AI FEED 01</span><h3>Live AI Video Monitoring</h3><p>Updates</p></div>
+                            <span class="live-tag"><i class="fa-solid fa-circle"></i> OPEN FEED</span>
+                        </div>
+                        <div class="camera-frame">
+                            <div class="camera-grid"></div>
+                            <i class="fa-solid fa-video camera-icon"></i>
+                            <strong>AI CAMERA / BUS-001</strong>
+                            <span>Feed available through local detection process</span>
+                            <small>Awaiting camera stream</small>
+                        </div>
+                        <div class="detection-legend"><span><i class="vehicle-box"></i> Vehicle</span><span><i class="bus-box"></i> Bus</span><span><i class="person-box"></i> Pedestrian</span></div>
+                    </div>
+                </div>
+                </section>
+
+
+            <section id="road-health" class="history-panel dashboard-content">
+                <div class="history-panel-header">
+                    <h2><i class="fa-solid fa-table-list"></i>Road Health Records</h2>
+                    <span id="dashboardHistoryCount">0 Records</span>
+                </div>
+
+                <div class="table-container">
+                    <table class="reports-table">
+                        <thead>
+                            <tr>
+                                <th data-i18n="bus">Bus</th>
+                                <th data-i18n="camera">Camera</th>
+                                <th>🕒 Timestamp</th>
+                                <th>🚗 Vehicles</th>
+                                <th>👤 Persons</th>
+                                <th>🚦 Traffic</th>
+                                <th>🛣️ Defects</th>
+                                <th>🕳️ Potholes</th>
+                                <th>🌊 Floods</th>
+                                <th>🚸 Zebra Crossings</th>
+                                <th>🚨 Alerts</th>
+                                <th>📍 Latitude</th>
+                                <th>📍 Longitude</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dashboardHistoryTableBody">
+                            <tr>
+                                <td colspan="13">No detection records saved yet.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="detection-events-panel">
+                    <div class="detection-events-heading">
+                        <h3><i class="fa-solid fa-bolt"></i> Confirmed AI Detection Events</h3>
+                        <span>Confidence-qualified / deduplicated</span>
+                    </div>
+                    <div id="detectionEvents" class="detection-events-list">
+                        <p class="empty-detection-events">No confirmed AI events yet.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section id="traffic-analytics" class="traffic-analytics-panel dashboard-content">
+                <div class="history-panel-header">
+                    <div>
+                        <h2>Traffic Analytics</h2>
+                        <p>Traffic Analytics / Live vehicle and pedestrian detections</p>
+                    </div>
+                    <span id="trafficGraphStatus">Live</span>
+                </div>
+                <div class="traffic-chart-container">
+                    <canvas id="trafficChart" aria-label="Live traffic analytics graph"></canvas>
+                </div>
+                <div class="chart-legend">
+                    <span><i class="legend-vehicles"></i> Vehicles</span>
+                    <span><i class="legend-persons"></i> Persons</span>
+                </div>
+            </section>
+
+            <!-- BOTTOM SECTION -->
+            <section class="bottom-section dashboard-content">
+
+                <!-- RECENT EVENTS -->
+
+                <div id="incidents" class="events">
+
+                    <h2><i class="fa-solid fa-triangle-exclamation"></i> <span data-i18n="recentIncidents">Accident &amp; Incident Alerts</span></h2>
+
+                    <div id="accidentAlertPanel" class="accident-alert-panel" hidden></div>
+
+                    <div class="event">
+
+                        <span>🕳️</span>
+
+                        <div>
+                            <strong>Pothole Detected</strong>
+                            <p>Bus-001 • 2 minutes ago</p>
+                        </div>
+
+                        <span class="status high">
+                            HIGH
+                        </span>
+
+                    </div>
+
+
+                    <div class="event">
+
+                        <span>🚗</span>
+
+                        <div>
+                            <strong>Heavy Traffic</strong>
+                            <p>Main Road • 5 minutes ago</p>
+                        </div>
+
+                        <span class="status medium">
+                            MEDIUM
+                        </span>
+
+                    </div>
+
+
+                    <div class="event">
+
+                        <span>🌊</span>
+
+                        <div>
+                            <strong>Waterlogging</strong>
+                            <p>Bus-003 • 10 minutes ago</p>
+                        </div>
+
+                        <span class="status high">
+                            HIGH
+                        </span>
+
+                    </div>
+
+                </div>
+
+
+                <!-- EDGE AI -->
+
+                <div id="bus-fleet" class="ai-status">
+
+                    <h2><i class="fa-solid fa-microchip"></i> Connected Response Fleet</h2>
+
+                    <div class="ai-item">
+
+                        <span>🟢</span>
+
+                        <div>
+                            <strong>BUS-001</strong>
+                            <p>ONLINE / AI CONNECTED / GPS ACTIVE</p>
+                        </div>
+
+                    </div>
+
+
+                    <div class="ai-item">
+
+                        <span>🟢</span>
+
+                        <div>
+                            <strong>BUS-002</strong>
+                            <p>ONLINE / AI CONNECTED / GPS ACTIVE</p>
+                        </div>
+
+                    </div>
+
+
+                    <div class="ai-item">
+
+                        <span>🟡</span>
+
+                        <div>
+                            <strong>BUS-003</strong>
+                            <p>DEMO PLACEHOLDER / NOT CONNECTED</p>
+                        </div>
+
+                    </div>
+
+                </div>
+            </section>
+
+            <div id="cameraModal" class="camera-modal" role="dialog" aria-modal="true" aria-labelledby="cameraModalTitle" aria-hidden="true">
+                <div class="camera-modal-backdrop" data-camera-close></div>
+                <section class="camera-modal-panel">
+                    <header class="camera-modal-header">
+                        <div>
+                            <span class="modal-kicker"><i class="fa-solid fa-circle"></i> <span id="cameraModalStatus">CONNECTING</span></span>
+                            <h2 id="cameraModalTitle">Live AI Camera Monitoring</h2>
+                            <p>Live AI Camera Monitoring / AI FEED 01 / BUS-001</p>
+                        </div>
+                        <button type="button" id="closeCameraModal" class="modal-close" aria-label="Close camera viewer"><i class="fa-solid fa-xmark"></i></button>
+                    </header>
+                    <div class="camera-modal-body">
+                        <div class="modal-stream-frame">
+                            <img id="cameraStream" alt="Live AI camera stream for BUS-001">
+                            <div id="cameraStreamFallback" class="stream-fallback" hidden>
+                                <i class="fa-solid fa-video-slash"></i>
+                                <strong>Camera stream unavailable</strong>
+                                <span>Please check the connected camera / AI service.</span>
+                            </div>
+                        </div>
+                        <div class="camera-modal-info">
+                            <span><b>AI FEED 01</b>BUS-001</span>
+                            <span><b>VEHICLES</b><em id="cameraVehicleCount">0</em></span>
+                            <span><b>PERSONS</b><em id="cameraPersonCount">0</em></span>
+                            <span><b>STATUS</b><em id="cameraConnectionState">Connecting</em></span>
+                        </div>
+                    </div>
+                </section>
+            </div>
+
+            <section id="settings" class="settings-panel dashboard-content">
+                <div><i class="fa-solid fa-shield-halved"></i><div><strong>Demonstration Environment</strong><span>Hackathon prototype / control-room configuration</span></div></div>
+                <span class="status medium">DEMO</span>
+            </section>
+
+            <div id="accidentToast" class="accident-toast" role="alert" aria-live="assertive" aria-atomic="true" hidden></div>
+
+        <!-- ==========================================
+     REPORTS PAGE
+========================================== -->
+
+<section id="reports" class="reports-page">
+
+    <!-- REPORT HEADER -->
+    <div class="report-header">
+
+        <div>
+                    <h2><i class="fa-solid fa-file-lines"></i> Reports</h2>
+                    <p>Reports &amp; Monitoring Records / Urban Intelligence Portal</p>
+        </div>
+
+        <button type="button" id="backDashboard">
+            ← Back to Dashboard
+        </button>
+
+    </div>
+
+
+    <!-- ==========================================
+         REPORT SUMMARY CARDS
+    ========================================== -->
+
+    <div class="report-grid">
+
+        <!-- TOTAL VEHICLES -->
+        <div class="report-card">
+
+            <span>🚗</span>
+
+            <h3>Total Traffic</h3>
+
+            <h2 id="reportVehicles">
+                0
+            </h2>
+
+            <p>
+                Vehicles detected
+            </p>
+
+        </div>
+
+
+        <!-- ROAD DEFECTS -->
+        <div class="report-card">
+
+            <span>🛣️</span>
+
+            <h3>Road Health</h3>
+
+            <h2 id="reportDefects">
+                0
+            </h2>
+
+            <p>
+                Road defects detected
+            </p>
+
+        </div>
+
+
+        <!-- INCIDENTS -->
+        <div class="report-card">
+
+            <span>🚨</span>
+
+            <h3>Incidents</h3>
+
+            <h2 id="reportAlerts">
+                0
+            </h2>
+
+            <p>
+                Total incidents / alerts
+            </p>
+
+        </div>
+
+
+        <!-- TRAFFIC STATUS -->
+        <div class="report-card">
+
+            <span>🚦</span>
+
+            <h3>Traffic Status</h3>
+
+            <h2 id="reportTraffic">
+                LOW
+            </h2>
+
+            <p>
+                Current traffic condition
+            </p>
+
+        </div>
+
+    </div>
+
+
+    <!-- ==========================================
+         ADDITIONAL REPORT INFORMATION
+    ========================================== -->
+
+    <div class="report-overview">
+
+        <div class="overview-card">
+
+            <h3>👤 Total Persons</h3>
+
+            <h2 id="reportPersons">
+                0
+            </h2>
+
+            <p>
+                Persons detected by AI
+            </p>
+
+        </div>
+
+
+        <div class="overview-card">
+
+            <h3>🚌 Active Fleet</h3>
+
+            <h2 id="reportBuses">
+                3
+            </h2>
+
+            <p>
+                Connected buses
+            </p>
+
+        </div>
+
+
+        <div class="overview-card">
+
+            <h3>📍 Latest GPS</h3>
+
+            <h2 id="reportGPS">
+                11.0168, 76.9558
+            </h2>
+
+            <p>
+                Latest bus location
+            </p>
+
+        </div>
+
+    </div>
+
+
+    <!-- ==========================================
+         SAVED DETECTION HISTORY
+    ========================================== -->
+
+    <div id="reportHistory" class="report-history">
+
+        <div class="history-header">
+
+            <div>
+                <h2>📋 Detection History</h2>
+
+                <p>
+                    AI-generated reports from connected buses
+                </p>
+            </div>
+
+            <span id="reportCount">
+                0 Reports
+            </span>
+
+        </div>
+
+
+        <!-- TABLE WILL BE GENERATED BY JAVASCRIPT -->
+
+        <div class="table-container">
+
+            <table class="reports-table">
+
+                <thead>
+
+                    <tr>
+
+                        <th data-i18n="bus">Bus</th>
+                        <th data-i18n="camera">Camera</th>
+                        <th>🕒 Timestamp</th>
+
+                        <th>🚗 Vehicles</th>
+
+                        <th>👤 Persons</th>
+
+                        <th>🚦 Traffic</th>
+                        <th>🛣️ Defects</th>
+                        <th>🕳️ Potholes</th>
+                        <th>🌊 Floods</th>
+                        <th>🚸 Zebra Crossings</th>
+                        <th>🚨 Alerts</th>
+                        <th>📍 Latitude</th>
+
+                        <th>📍 Longitude</th>
+
+                    </tr>
+
+                </thead>
+
+
+                <tbody id="reportsTableBody">
+
+                    <tr>
+
+                        <td colspan="13">
+                            No reports saved yet.
+                        </td>
+
+                    </tr>
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+    </div>
+
+    <div class="report-history accident-reports">
+        <div class="history-header">
+            <div>
+                <h2>⚠️ Accident Reports</h2>
+                <p>Accident-only ANPR and evidence records</p>
+            </div>
+            <span id="accidentReportCount">0 Accidents</span>
+        </div>
+        <div class="table-container">
+            <table class="reports-table accident-reports-table">
+                <thead>
+                    <tr>
+                        <th>Incident ID</th>
+                        <th data-i18n="bus">Bus</th>
+                        <th data-i18n="camera">Camera</th>
+                        <th>Date and time</th>
+                        <th>Vehicle</th>
+                        <th>Registration</th>
+                        <th>Plate confidence</th>
+                        <th>Status</th>
+                        <th>Location</th>
+                        <th>Evidence</th>
+                    </tr>
+                </thead>
+                <tbody id="accidentReportsTableBody">
+                    <tr><td colspan="10">No accident reports saved yet.</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</section>
+                <footer class="portal-footer">
+                    <div><strong>© 2026 Ministry of Public Transport</strong><span>Urban X Intelligence &amp; Monitoring Portal</span><strong>This site is developed for education purpose</strong></div>
+                    <span>Make in India</span>
+                </footer>
+            </main>
+
+    </div>
+
+    <!-- Leaflet JavaScript -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script src="translations.js"></script>
+<script src="script.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+    "liveServer.settings.ignoreFiles": [
+        "**/*.db",
+        "**/*.db-*",
+        "**/__pycache__/**"
+    ],
+    "files.watcherExclude": {
+        "**/*.db": true,
+        "**/*.db-*": true,
+        "**/__pycache__/**": true
+    }
+}
