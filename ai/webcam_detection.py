@@ -10,7 +10,7 @@ import time
 import os
 import json
 import numpy as np
-from queue import Empty, Full, Queue
+from queue import Queue
 from collections import deque
 
 try:
@@ -140,8 +140,8 @@ incident_sequence = 0
 last_active_alerts = set()
 last_ingested_signatures = {}
 database_write_queue = Queue()
-browser_frame_queue = Queue(maxsize=1)
 browser_camera_active = BROWSER_CAMERA_ONLY
+browser_processing_lock = threading.Lock()
 
 
 # ==========================================
@@ -504,10 +504,10 @@ def detect_browser_frame():
     global browser_camera_active
 
     if request.method == "DELETE":
-        browser_camera_active = BROWSER_CAMERA_ONLY
-        live_data["video_source"] = "Browser webcam" if BROWSER_CAMERA_ONLY else VIDEO_SOURCE_LABEL
+        browser_camera_active = False
+        live_data["video_source"] = "Browser webcam"
         print("[CAMERA] Browser camera session released")
-        return jsonify({"accepted": True, "browser_camera_active": browser_camera_active})
+        return jsonify({"accepted": True, "browser_camera_active": False})
 
     uploaded_frame = request.files.get("frame")
     encoded_frame = uploaded_frame.read() if uploaded_frame else request.get_data(cache=False)
@@ -523,17 +523,34 @@ def detect_browser_frame():
 
     browser_camera_active = True
     live_data["video_source"] = "Browser webcam"
-    try:
-        browser_frame_queue.get_nowait()
-    except Empty:
-        pass
-    try:
-        browser_frame_queue.put_nowait(frame)
-    except Full:
-        return jsonify({"accepted": False, "error": "Frame queue is busy"}), 503
+    print("[AI FRAME] Browser frame received", flush=True)
 
-    print("[AI FRAME] Received frame")
-    return jsonify({"accepted": True, "queued": True})
+    if not browser_processing_lock.acquire(blocking=False):
+        return jsonify({
+            "accepted": False,
+            "processed": False,
+            "error": "AI is processing previous frame",
+        }), 429
+
+    try:
+        print("[AI FRAME] Starting YOLO processing", flush=True)
+        process_frame(frame)
+        return jsonify({
+            "accepted": True,
+            "processed": True,
+            "data": live_data,
+        })
+    except Exception as error:
+        import traceback
+        traceback.print_exc()
+        print(f"[AI ERROR] {error}", flush=True)
+        return jsonify({
+            "accepted": False,
+            "processed": False,
+            "error": str(error),
+        }), 500
+    finally:
+        browser_processing_lock.release()
 
 
 # ==========================================
@@ -750,8 +767,6 @@ api_thread = threading.Thread(
     target=run_api,
     daemon=True
 )
-
-api_thread.start()
 
 
 # ==========================================
@@ -1171,34 +1186,11 @@ update_bus_registry(
 
 
 # ==========================================
-# WEBCAM DETECTION LOOP
+# FRAME PROCESSING
 # ==========================================
 
-while True:
-
-    # Read a browser frame when the online camera is active; otherwise use the
-    # existing local webcam or configured MP4 source.
-    if browser_camera_active:
-        try:
-            frame = browser_frame_queue.get(timeout=0.25)
-            print("[QUEUE TEST] Browser frame received", flush=True)
-            success = True
-        except Empty:
-            continue
-    elif cap is not None:
-        success, frame = cap.read()
-    else:
-        try:
-            frame = browser_frame_queue.get(timeout=0.25)
-            success = True
-        except Empty:
-            continue
-
-    if not success:
-        print("Unable to access local camera; waiting for browser camera frames")
-        cap.release()
-        cap = None
-        continue
+def process_frame(frame):
+    global latest_frame, pending_accident, last_active_alerts
 
     accident_frame_buffer.append(frame.copy())
 
@@ -1207,7 +1199,9 @@ while True:
     # YOLO DETECTION
     # ==========================================
 
+    print("[YOLO TEST] Running vehicle/person YOLO", flush=True)
     results = model(frame, verbose=False)
+    print("[YOLO TEST] Vehicle/person YOLO completed", flush=True)
     print("[YOLO TEST] Results received:", len(results))
     print("[YOLO TEST] Frame shape:", frame.shape)
     pothole_results = (
@@ -1290,6 +1284,13 @@ while True:
         zebra_results, zebra_model, zebra_classes
     )
     zebra_crossing_count = len(zebra_detections)
+
+    print(
+        f"[AI FRAME] Detection result | Vehicles: {vehicle_count} | "
+        f"Persons: {person_count} | Potholes: {pothole_count} | "
+        f"Floods: {flood_count} | Zebra: {zebra_crossing_count}",
+        flush=True,
+    )
 
     log_and_save_detection_events(
         "Pothole", pothole_detections, latitude, longitude
@@ -1431,6 +1432,15 @@ while True:
             "traffic_status": traffic_status,
             "active_alerts": active_alerts,
         },
+    )
+    print(
+        f"[LIVE DATA] vehicles={live_data['vehicles']} "
+        f"persons={live_data['persons']} "
+        f"potholes={live_data['potholes']} "
+        f"floods={live_data['floods']} "
+        f"zebra={live_data['zebra_crossings']} "
+        f"alerts={live_data['active_alerts']}",
+        flush=True,
     )
 
 
@@ -1576,27 +1586,30 @@ while True:
     with latest_frame_lock:
         latest_frame = annotated_frame.copy()
 
-    if browser_camera_active:
-        print(
-            f"[AI FRAME] Processing frame | Vehicles: {vehicle_count} | "
-            f"Potholes: {pothole_count} | Water: {flood_count}"
-        )
-    # ==========================================
-    # SHOW WEBCAM - LOCAL ONLY
-    # ==========================================
+    return annotated_frame
 
-    if not BROWSER_CAMERA_ONLY:
-        cv2.imshow(
-            "UrbanEye AI - Live Detection",
-            annotated_frame
-        )
 
-        # ==========================================
-        # PRESS Q TO STOP
-        # ==========================================
+# The request handler owns browser-camera inference. This thread remains only
+# for the existing local webcam or configured video source.
+api_thread.start()
 
+if not BROWSER_CAMERA_ONLY:
+    while True:
+        success, frame = cap.read()
+        if not success:
+            print("Unable to access local camera; waiting for local frames")
+            cap.release()
+            cap = None
+            break
+
+        annotated_frame = process_frame(frame)
+        cv2.imshow("UrbanEye AI - Live Detection", annotated_frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
+else:
+    while True:
+        time.sleep(3600)
+
 # ==========================================
 # CLEANUP
 # ==========================================
