@@ -9,6 +9,7 @@ import sqlite3
 import time
 import os
 import json
+import gc
 import numpy as np
 from queue import Queue
 from collections import deque
@@ -46,6 +47,12 @@ VIDEO_SOURCE_LABEL = (
 )
 CAMERA_MODE = os.getenv("SMART_ROAD_CAMERA_MODE", "local").strip().lower()
 BROWSER_CAMERA_ONLY = CAMERA_MODE == "browser" or VIDEO_SOURCE_VALUE.lower() == "browser"
+RENDER_LITE_MODE = os.getenv("RENDER_LITE_MODE", "false").strip().lower() in {
+    "1", "true", "yes", "on"
+}
+MAX_BROWSER_FRAME_WIDTH = 640
+CUSTOM_MODEL_FRAME_INTERVAL = 3
+ACCIDENT_MODEL_FRAME_INTERVAL = 5
 
 
 # ==========================================
@@ -129,11 +136,16 @@ last_detection_log = {
     "Zebra": set()
 }
 last_event_times = {}
-accident_frame_buffer = deque(maxlen=ACCIDENT_BUFFER_SECONDS * ACCIDENT_VIDEO_FPS)
+accident_frame_buffer = deque(maxlen=ACCIDENT_HISTORY_FRAMES)
 accident_confirmation_count = 0
 accident_detection_history = deque(maxlen=ACCIDENT_HISTORY_FRAMES)
 current_accident_overlap = 0.0
 current_accident_confidence = 0.0
+last_accident_detected = False
+processing_frame_count = 0
+cached_pothole_detections = []
+cached_flood_detections = []
+cached_zebra_detections = []
 last_accident_time = 0
 pending_accident = None
 incident_sequence = 0
@@ -521,6 +533,17 @@ def detect_browser_frame():
     if frame is None:
         return jsonify({"error": "Invalid JPEG frame"}), 400
 
+    frame_height, frame_width = frame.shape[:2]
+    if frame_width > MAX_BROWSER_FRAME_WIDTH:
+        resized_height = int(
+            frame_height * MAX_BROWSER_FRAME_WIDTH / frame_width
+        )
+        frame = cv2.resize(
+            frame,
+            (MAX_BROWSER_FRAME_WIDTH, resized_height),
+            interpolation=cv2.INTER_AREA,
+        )
+
     browser_camera_active = True
     live_data["video_source"] = "Browser webcam"
     print("[AI FRAME] Browser frame received", flush=True)
@@ -775,6 +798,7 @@ api_thread = threading.Thread(
 
 project_path = Path(__file__).resolve().parent.parent
 model = YOLO(str(project_path / "yolo11n.pt"))
+INFERENCE_OPTIONS = {"imgsz": 320} if RENDER_LITE_MODE else {}
 
 
 def load_custom_model(label, filename, status_key):
@@ -904,7 +928,13 @@ def read_accident_plate(vehicle_crop):
         return "Unreadable", None, None
 
     try:
-        plate_results = plate_model(vehicle_crop, conf=CONFIDENCE_THRESHOLD, verbose=False)
+        print("[AI] Number plate detection", flush=True)
+        plate_results = plate_model(
+            vehicle_crop,
+            conf=CONFIDENCE_THRESHOLD,
+            verbose=False,
+            **INFERENCE_OPTIONS,
+        )
         best_box = None
         best_confidence = 0
         for result in plate_results:
@@ -915,6 +945,8 @@ def read_accident_plate(vehicle_crop):
                     best_confidence = confidence
         if best_box is None:
             print("ANPR result: Unreadable (no plate detected on accident vehicle)")
+            del plate_results
+            gc.collect()
             return "Unreadable", None, None
 
         plate_crop = clamp_crop(vehicle_crop, best_box)
@@ -933,9 +965,12 @@ def read_accident_plate(vehicle_crop):
             f"ANPR result: {registration_number}, "
             f"plate confidence={best_confidence:.2f}"
         )
+        del plate_results
+        gc.collect()
         return registration_number, plate_crop, best_confidence
     except Exception as error:
         print(f"Detailed ANPR error: {error}")
+        gc.collect()
         return "Unreadable", None, None
 
 
@@ -976,14 +1011,26 @@ def finalize_accident(pending):
         print(f"Detailed accident report error: {error}")
 
 
-def confirm_accident(frame, vehicle_detections, latitude, longitude):
+def confirm_accident(
+    frame,
+    vehicle_detections,
+    latitude,
+    longitude,
+    run_accident_model=True,
+):
     global accident_confirmation_count, current_accident_confidence
-    global last_accident_time, incident_sequence
+    global last_accident_time, incident_sequence, last_accident_detected
     pair = None
     accident_detected = False
 
-    if accident_model is not None:
-        accident_results = accident_model(frame, conf=CONFIDENCE_THRESHOLD, verbose=False)
+    if accident_model is not None and run_accident_model:
+        print("[AI] Accident detection", flush=True)
+        accident_results = accident_model(
+            frame,
+            conf=CONFIDENCE_THRESHOLD,
+            verbose=False,
+            **INFERENCE_OPTIONS,
+        )
         accident_confidences = []
         for result in accident_results:
             for box in result.boxes:
@@ -997,10 +1044,16 @@ def confirm_accident(frame, vehicle_detections, latitude, longitude):
             f"Accident model detection: confidence={current_accident_confidence:.2f}"
         )
         accident_detected = current_accident_confidence >= CONFIDENCE_THRESHOLD
+        last_accident_detected = accident_detected
+        del accident_results
+        gc.collect()
+    elif accident_model is not None:
+        accident_detected = last_accident_detected
     else:
         pair = accident_vehicle_pair(vehicle_detections)
         accident_detected = pair is not None
         current_accident_confidence = 0.0
+        last_accident_detected = accident_detected
 
     accident_detection_history.append(1 if accident_detected else 0)
     accident_confirmation_count = sum(accident_detection_history)
@@ -1152,6 +1205,7 @@ print(f"Zebra Crossing model: {'LOADED' if zebra_model else 'NOT FOUND'}")
 print(f"Camera mode: {CAMERA_MODE}")
 print(f"Video source: {'Browser webcam' if BROWSER_CAMERA_ONLY else VIDEO_SOURCE_LABEL}")
 print(f"Demo test mode: {'ENABLED' if DEMO_TEST_MODE else 'DISABLED'}")
+print(f"Render Lite mode: {'ENABLED' if RENDER_LITE_MODE else 'DISABLED'}")
 print(f"Accident model: {'LOADED' if accident_model else 'UNAVAILABLE (vehicle overlap fallback)'}")
 print(f"Plate model: {'LOADED' if plate_model else 'UNAVAILABLE (ANPR returns Unreadable)'}")
 print(
@@ -1191,24 +1245,41 @@ update_bus_registry(
 
 def process_frame(frame):
     global latest_frame, pending_accident, last_active_alerts
+    global processing_frame_count
+    global cached_pothole_detections, cached_flood_detections
+    global cached_zebra_detections
 
-    accident_frame_buffer.append(frame.copy())
+    processing_frame_count += 1
+    stored_frame = frame
+    if stored_frame.shape[1] > MAX_BROWSER_FRAME_WIDTH:
+        stored_height = int(
+            stored_frame.shape[0] * MAX_BROWSER_FRAME_WIDTH / stored_frame.shape[1]
+        )
+        stored_frame = cv2.resize(
+            stored_frame,
+            (MAX_BROWSER_FRAME_WIDTH, stored_height),
+            interpolation=cv2.INTER_AREA,
+        )
+    accident_frame_buffer.append(stored_frame.copy())
 
 
     # ==========================================
     # YOLO DETECTION
     # ==========================================
 
+    print("[AI] Vehicle/person detection", flush=True)
     print("[YOLO TEST] Running vehicle/person YOLO", flush=True)
-    results = model(frame, verbose=False)
+    results = model(frame, verbose=False, **INFERENCE_OPTIONS)
     print("[YOLO TEST] Vehicle/person YOLO completed", flush=True)
     print("[YOLO TEST] Results received:", len(results))
     print("[YOLO TEST] Frame shape:", frame.shape)
-    pothole_results = (
-        pothole_model(frame, conf=CONFIDENCE_THRESHOLD, verbose=False)
-        if pothole_model is not None
-        else []
+    lite_custom_frame = RENDER_LITE_MODE and (
+        processing_frame_count % CUSTOM_MODEL_FRAME_INTERVAL != 1
     )
+    run_custom_models = not RENDER_LITE_MODE or not lite_custom_frame
+    pothole_results = []
+    flood_results = []
+    zebra_results = []
 
     vehicle_count = 0
     person_count = 0
@@ -1260,29 +1331,77 @@ def process_frame(frame):
                     "coordinates": [int(value) for value in box.xyxy[0].tolist()],
                 })
 
-    pothole_detections = custom_detections(
-        pothole_results, pothole_model, pothole_classes
-    )
+    annotated_frame = results[0].plot()
+    del results
+    gc.collect()
+
+    if run_custom_models:
+        print("[AI] Pothole detection", flush=True)
+        pothole_results = (
+            pothole_model(
+                frame,
+                conf=CONFIDENCE_THRESHOLD,
+                verbose=False,
+                **INFERENCE_OPTIONS,
+            )
+            if pothole_model is not None
+            else []
+        )
+        pothole_detections = custom_detections(
+            pothole_results, pothole_model, pothole_classes
+        )
+        if pothole_results:
+            annotated_frame = pothole_results[0].plot(img=annotated_frame)
+        cached_pothole_detections = pothole_detections
+        del pothole_results
+        gc.collect()
+
+        print("[AI] Flood detection", flush=True)
+        flood_results = (
+            flood_model(
+                frame,
+                conf=CONFIDENCE_THRESHOLD,
+                verbose=False,
+                **INFERENCE_OPTIONS,
+            )
+            if flood_model is not None
+            else []
+        )
+        flood_detections = custom_detections(
+            flood_results, flood_model, flood_classes
+        )
+        if flood_results:
+            annotated_frame = flood_results[0].plot(img=annotated_frame)
+        cached_flood_detections = flood_detections
+        del flood_results
+        gc.collect()
+
+        print("[AI] Zebra detection", flush=True)
+        zebra_results = (
+            zebra_model(
+                frame,
+                conf=CONFIDENCE_THRESHOLD,
+                verbose=False,
+                **INFERENCE_OPTIONS,
+            )
+            if zebra_model is not None
+            else []
+        )
+        zebra_detections = custom_detections(
+            zebra_results, zebra_model, zebra_classes
+        )
+        if zebra_results:
+            annotated_frame = zebra_results[0].plot(img=annotated_frame)
+        cached_zebra_detections = zebra_detections
+        del zebra_results
+        gc.collect()
+    else:
+        pothole_detections = cached_pothole_detections
+        flood_detections = cached_flood_detections
+        zebra_detections = cached_zebra_detections
+
     pothole_count = len(pothole_detections)
-
-    flood_results = (
-        flood_model(frame, conf=CONFIDENCE_THRESHOLD, verbose=False)
-        if flood_model is not None
-        else []
-    )
-    flood_detections = custom_detections(
-        flood_results, flood_model, flood_classes
-    )
     flood_count = len(flood_detections)
-
-    zebra_results = (
-        zebra_model(frame, conf=CONFIDENCE_THRESHOLD, verbose=False)
-        if zebra_model is not None
-        else []
-    )
-    zebra_detections = custom_detections(
-        zebra_results, zebra_model, zebra_classes
-    )
     zebra_crossing_count = len(zebra_detections)
 
     print(
@@ -1302,8 +1421,16 @@ def process_frame(frame):
         "Zebra", zebra_detections, latitude, longitude
     )
 
+    run_accident_model = (
+        not RENDER_LITE_MODE
+        or processing_frame_count % ACCIDENT_MODEL_FRAME_INTERVAL == 1
+    )
     accident_candidate = confirm_accident(
-        frame, vehicle_detections, latitude, longitude
+        frame,
+        vehicle_detections,
+        latitude,
+        longitude,
+        run_accident_model=run_accident_model,
     )
     if accident_candidate is not None and pending_accident is None:
         pending_accident = accident_candidate
@@ -1313,7 +1440,7 @@ def process_frame(frame):
             "post-incident frames"
         )
     elif pending_accident is not None:
-        pending_accident["frames"].append(frame.copy())
+        pending_accident["frames"].append(stored_frame.copy())
         pending_accident["remaining_frames"] -= 1
         if pending_accident["remaining_frames"] <= 0:
             finalize_accident(pending_accident)
@@ -1507,18 +1634,6 @@ def process_frame(frame):
 
 
     # ==========================================
-    # DRAW YOLO DETECTION BOXES
-    # ==========================================
-
-    annotated_frame = results[0].plot()
-    if pothole_results:
-        annotated_frame = pothole_results[0].plot(img=annotated_frame)
-    if flood_results:
-        annotated_frame = flood_results[0].plot(img=annotated_frame)
-    if zebra_results:
-        annotated_frame = zebra_results[0].plot(img=annotated_frame)
-
-    # ==========================================
     # DISPLAY INFORMATION
     # ==========================================
 
@@ -1586,6 +1701,7 @@ def process_frame(frame):
     with latest_frame_lock:
         latest_frame = annotated_frame.copy()
 
+    print("[AI FRAME] Processing completed", flush=True)
     return annotated_frame
 
 
