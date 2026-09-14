@@ -61,7 +61,7 @@ const busFilter = document.getElementById("busFilter");
 const busMarkers = new Map();
 let selectedBusId = "";
 const markerState = new Map();
-const API_BASE_URL = window.URBANEYE_API_BASE_URL ?? "https://urban-x-ai-backend.onrender.com";
+const API_BASE_URL = "https://urban-x-ai-backend.onrender.com";
 
 function apiUrl(path) {
     const url = new URL(path, API_BASE_URL || window.location.origin);
@@ -171,6 +171,7 @@ let cameraStreamActive = false;
 let cameraCaptureInterval = null;
 let cameraCanvas = null;
 let cameraContext = null;
+let cameraFrameBusy = false;
 
 async function openCameraModal() {
     if (!cameraModal || !cameraStream) {
@@ -236,82 +237,86 @@ async function openCameraModal() {
 }
 
 
-function startCameraDetection() {
+async function sendCameraFrame() {
+    if (!cameraStreamActive || cameraFrameBusy) {
+        return;
+    }
 
+    if (!cameraStream.videoWidth || !cameraStream.videoHeight) {
+        return;
+    }
+
+    cameraFrameBusy = true;
+
+    try {
+        cameraCanvas.width = cameraStream.videoWidth;
+        cameraCanvas.height = cameraStream.videoHeight;
+
+        cameraContext.drawImage(
+            cameraStream,
+            0,
+            0,
+            cameraCanvas.width,
+            cameraCanvas.height
+        );
+
+        const blob = await new Promise(function (resolve) {
+            cameraCanvas.toBlob(
+                resolve,
+                "image/jpeg",
+                0.6
+            );
+        });
+
+        if (!blob) {
+            return;
+        }
+
+        console.log("[CAMERA] Sending frame to backend");
+
+        const response = await fetch(
+            apiUrl("/api/detect-frame"),
+            {
+                method: "POST",
+                headers: {
+                    "Content-Type": "image/jpeg"
+                },
+                body: blob
+            }
+        );
+
+        console.log(
+            "[CAMERA] Backend response:",
+            response.status
+        );
+
+        if (!response.ok) {
+            console.error(
+                "[CAMERA] Backend detection failed:",
+                response.status
+            );
+        }
+    } catch (error) {
+        console.error(
+            "[CAMERA] Frame detection error:",
+            error
+        );
+    } finally {
+        cameraFrameBusy = false;
+    }
+}
+
+function startCameraDetection() {
     if (cameraCaptureInterval) {
         clearInterval(cameraCaptureInterval);
     }
 
-    cameraCaptureInterval = setInterval(async function () {
+    console.log("[CAMERA] Starting frame detection");
 
-        if (!cameraStreamActive) {
-            return;
-        }
-
-        if (
-            !cameraStream.videoWidth ||
-            !cameraStream.videoHeight
-        ) {
-            return;
-        }
-
-        try {
-
-            cameraCanvas.width = cameraStream.videoWidth;
-            cameraCanvas.height = cameraStream.videoHeight;
-
-            cameraContext.drawImage(
-                cameraStream,
-                0,
-                0,
-                cameraCanvas.width,
-                cameraCanvas.height
-            );
-
-            const blob = await new Promise(function (resolve) {
-
-                cameraCanvas.toBlob(
-                    resolve,
-                    "image/jpeg",
-                    0.75
-                );
-
-            });
-
-            if (!blob) {
-                return;
-            }
-
-            const response = await fetch(
-                apiUrl("/api/detect-frame"),
-                {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "image/jpeg"
-                    },
-                    body: blob
-                }
-            );
-
-            if (!response.ok) {
-
-                console.error(
-                    "[CAMERA] Detection request failed:",
-                    response.status
-                );
-
-            }
-
-        } catch (error) {
-
-            console.error(
-                "[CAMERA] Frame detection error:",
-                error
-            );
-
-        }
-
-    }, 500);
+    cameraCaptureInterval = setInterval(
+        sendCameraFrame,
+        1000
+    );
 }
 
 
